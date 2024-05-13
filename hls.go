@@ -75,7 +75,7 @@ func (h *HLSRecorder) OnEvent(event any) {
 	case AudioFrame:
 		if h.tsStartTime == 0 {
 			h.tsStartTime = v.AbsTime
-		} 
+		}
 		h.tsLastTime = v.AbsTime
 		h.Recorder.OnEvent(event)
 		pes := &mpegts.MpegtsPESFrame{
@@ -108,6 +108,8 @@ func (h *HLSRecorder) OnEvent(event any) {
 		h.Recycle()
 		h.Clear()
 		h.video_cc = pes.ContinuityCounter
+	case SEclose:
+		h.playlist.WriteEndList()
 	default:
 		h.Recorder.OnEvent(v)
 	}
