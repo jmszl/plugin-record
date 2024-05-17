@@ -31,6 +31,15 @@ func (r *RawRecorder) Start(streamPath string) error {
 	}
 	return r.start(r, streamPath, SUBTYPE_RAW)
 }
+
+func (r *RawRecorder) StartWithFileName(streamPath string, fileName string) error {
+	r.ID = streamPath + "/raw/" + fileName
+	if r.IsAudio {
+		r.ID += "_audio"
+	}
+	return r.start(r, streamPath, SUBTYPE_RAW)
+}
+
 func (r *RawRecorder) Close() (err error) {
 	if r.File != nil {
 		err = r.File.Close()

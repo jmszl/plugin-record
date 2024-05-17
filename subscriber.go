@@ -15,6 +15,7 @@ type IRecorder interface {
 	ISubscriber
 	GetRecorder() *Recorder
 	Start(streamPath string) error
+	StartWithFileName(streamPath string, fileName string) error
 	io.Closer
 	CreateFile() (FileWr, error)
 }

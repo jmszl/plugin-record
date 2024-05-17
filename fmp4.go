@@ -54,6 +54,11 @@ func (r *FMP4Recorder) Start(streamPath string) (err error) {
 	return r.start(r, streamPath, SUBTYPE_RAW)
 }
 
+func (r *FMP4Recorder) StartWithFileName(streamPath string, fileName string) error {
+	r.ID = streamPath + "/fmp4/" + fileName
+	return r.start(r, streamPath, SUBTYPE_RAW)
+}
+
 func (r *FMP4Recorder) Close() error {
 	if r.File != nil {
 		if r.video.fragment != nil {

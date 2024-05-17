@@ -1,6 +1,7 @@
 package record
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -28,6 +29,11 @@ func NewFLVRecorder() (r *FLVRecorder) {
 
 func (r *FLVRecorder) Start(streamPath string) (err error) {
 	r.ID = streamPath + "/flv"
+	return r.start(r, streamPath, SUBTYPE_FLV)
+}
+
+func (r *FLVRecorder) StartWithFileName(streamPath string, fileName string) error {
+	r.ID = fmt.Sprintf("%s/flv/%s", streamPath, fileName)
 	return r.start(r, streamPath, SUBTYPE_FLV)
 }
 

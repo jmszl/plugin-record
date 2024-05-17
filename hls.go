@@ -34,6 +34,12 @@ func (h *HLSRecorder) Start(streamPath string) error {
 	h.ID = streamPath + "/hls"
 	return h.start(h, streamPath, SUBTYPE_RAW)
 }
+
+func (h *HLSRecorder) StartWithFileName(streamPath string, fileName string) error {
+	h.ID = streamPath + "/hls/" + fileName
+	return h.start(h, streamPath, SUBTYPE_RAW)
+}
+
 func (r *HLSRecorder) Close() (err error) {
 	if r.File != nil {
 		inf := hls.PlaylistInf{
