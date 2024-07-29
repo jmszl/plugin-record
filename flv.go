@@ -47,7 +47,7 @@ func (r *FLVRecorder) writeMetaData(file FileWr, duration int64) {
 		"hasVideo":        hasVideo,
 		"hasAudio":        hasAudio,
 		"hasMatadata":     true,
-		"canSeekToEnd":    false,
+		"canSeekToEnd":    true,
 		"duration":        float64(duration) / 1000,
 		"hasKeyFrames":    len(r.filepositions) > 0,
 		"filesize":        0,
