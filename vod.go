@@ -2,7 +2,6 @@ package record
 
 import (
 	"bufio"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"io/fs"
@@ -39,7 +38,6 @@ func (conf *RecordConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func putFlvTimestamp(header []byte, timestamp uint32) {
-	fmt.Println(timestamp)
 	header[4] = byte(timestamp >> 16)
 	header[5] = byte(timestamp >> 8)
 	header[6] = byte(timestamp)
@@ -80,7 +78,7 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 				time.Sleep(sleepTime)
 			}
 		}
-		filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error {
+		err = filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error {
 			if info.IsDir() || !strings.HasSuffix(info.Name(), ".flv") {
 				return nil
 			}
@@ -116,96 +114,39 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 		}
 		flvHead := make([]byte, 9+4)
 		tagHead := make(util.Buffer, 11)
-		tagLen := make([]byte, 4)
-
-		info := fileList[0]
-		fmt.Println("read", info.Name())
-		filePath := filepath.Join(dir, info.Name())
-		file, err := os.Open(filePath)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		reader := bufio.NewReader(file)
-		_, err = io.ReadFull(reader, flvHead)
-		_, err = writer.Write(flvHead)
-
+		//tagLen := make([]byte, 4)
 		var init bool
 		if offsetTime == 0 {
 			init = true
+		} else {
+			offsetTimestamp = -uint32(offsetTime.Milliseconds())
 		}
-		for {
-			_, err = io.ReadFull(reader, tagHead)
-			if err != nil {
-				break
-			}
-			tmp := tagHead
-			t := tmp.ReadByte()
-			dataLen := tmp.ReadUint24()
-			lastTimestamp = tmp.ReadUint24() | uint32(tmp.ReadByte())<<24
-			//fmt.Println(lastTimestamp, tagHead)
-			if init {
-				if t == codec.FLV_TAG_TYPE_SCRIPT {
-					_, err = reader.Discard(int(dataLen) + 4)
-				} else {
-					lastTimestamp = lastTimestamp - uint32(offsetTime.Milliseconds())
-					//fmt.Println("inited", lastTimestamp)
-					putFlvTimestamp(tagHead, lastTimestamp)
-					_, err = writer.Write(tagHead)
-					_, err = io.CopyN(writer, reader, int64(dataLen+4))
-					speedControl()
-				}
-				continue
-			}
-			switch t {
-			case codec.FLV_TAG_TYPE_SCRIPT:
-				_, err = reader.Discard(int(dataLen) + 4)
-			case codec.FLV_TAG_TYPE_AUDIO:
-				if lastTimestamp == 0 {
-					_, err = writer.Write(tagHead)
-					_, err = io.CopyN(writer, reader, int64(dataLen+4))
-				} else {
-					_, err = reader.Discard(int(dataLen) + 4)
-				}
-			case codec.FLV_TAG_TYPE_VIDEO:
-				if lastTimestamp == 0 {
-					_, err = writer.Write(tagHead)
-					_, err = io.CopyN(writer, reader, int64(dataLen+4))
-				} else {
-					if lastTimestamp > uint32(offsetTime.Milliseconds()) {
-						data := make([]byte, dataLen+4)
-						_, err = io.ReadFull(reader, data)
-						frameType := (data[0] >> 4) & 0b0111
-						idr := frameType == 1 || frameType == 4
-						if idr {
-							init = true
-							//fmt.Println("init", lastTimestamp)
-							putFlvTimestamp(tagHead, 0)
-							_, err = writer.Write(tagHead)
-							_, err = writer.Write(data)
-						}
-					} else {
-						_, err = reader.Discard(int(dataLen) + 4)
-					}
-				}
-			}
-		}
-		err = file.Close()
-		offsetTimestamp = lastTimestamp
-		if !init {
-			offsetTimestamp = 0
-		}
-		for _, info = range fileList[1:] {
-			fmt.Println("read", info.Name())
-			filePath = filepath.Join(dir, info.Name())
-			file, err = os.Open(filePath)
-			if err != nil {
+		for i, info := range fileList {
+			if r.Context().Err() != nil {
 				return
 			}
-			reader = bufio.NewReader(file)
-			_, err = io.ReadFull(reader, flvHead) // 跳过 flv 头
-			for {
-				_, err = reader.Read(tagHead)
+			filePath := filepath.Join(dir, info.Name())
+			fmt.Println("read", filePath)
+			file, err := os.Open(filePath)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			reader := bufio.NewReader(file)
+			if i == 0 {
+				// 第一次写入头
+				_, err = io.ReadFull(reader, flvHead)
+				_, err = writer.Write(flvHead)
+			} else {
+				// 后面的头跳过
+				_, err = reader.Discard(13)
+				if !init {
+					offsetTime = 0
+				}
+			}
+
+			for err == nil {
+				_, err = io.ReadFull(reader, tagHead)
 				if err != nil {
 					break
 				}
@@ -213,22 +154,54 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 				t := tmp.ReadByte()
 				dataLen := tmp.ReadUint24()
 				lastTimestamp = tmp.ReadUint24() | uint32(tmp.ReadByte())<<24
-				//fmt.Println("lastTimestamp", lastTimestamp, offsetTimestamp+lastTimestamp)
-				lastTimestamp = offsetTimestamp + lastTimestamp // 改写时间戳
-				putFlvTimestamp(tagHead, lastTimestamp)
-				if t == codec.FLV_TAG_TYPE_SCRIPT {
-					_, err = reader.Discard(int(dataLen))
-					_, err = io.ReadFull(reader, tagLen)
-					fmt.Println("script", dataLen, binary.BigEndian.Uint32(tagLen))
-				} else {
-					_, err = writer.Write(tagHead)
-					_, err = io.CopyN(writer, reader, int64(dataLen+4))
-					speedControl()
+				//fmt.Println(lastTimestamp, tagHead)
+				if init {
+					if t == codec.FLV_TAG_TYPE_SCRIPT {
+						_, err = reader.Discard(int(dataLen) + 4)
+					} else {
+						lastTimestamp += offsetTimestamp
+						putFlvTimestamp(tagHead, lastTimestamp)
+						_, err = writer.Write(tagHead)
+						_, err = io.CopyN(writer, reader, int64(dataLen+4))
+						speedControl()
+					}
+					continue
 				}
-				continue
+				switch t {
+				case codec.FLV_TAG_TYPE_SCRIPT:
+					_, err = reader.Discard(int(dataLen) + 4)
+				case codec.FLV_TAG_TYPE_AUDIO:
+					if lastTimestamp == 0 {
+						_, err = writer.Write(tagHead)
+						_, err = io.CopyN(writer, reader, int64(dataLen+4))
+					} else {
+						_, err = reader.Discard(int(dataLen) + 4)
+					}
+				case codec.FLV_TAG_TYPE_VIDEO:
+					if lastTimestamp == 0 {
+						_, err = writer.Write(tagHead)
+						_, err = io.CopyN(writer, reader, int64(dataLen+4))
+					} else {
+						if lastTimestamp > uint32(offsetTime.Milliseconds()) {
+							data := make([]byte, dataLen+4)
+							_, err = io.ReadFull(reader, data)
+							frameType := (data[0] >> 4) & 0b0111
+							idr := frameType == 1 || frameType == 4
+							if idr {
+								init = true
+								//fmt.Println("init", lastTimestamp)
+								putFlvTimestamp(tagHead, 0)
+								_, err = writer.Write(tagHead)
+								_, err = writer.Write(data)
+							}
+						} else {
+							_, err = reader.Discard(int(dataLen) + 4)
+						}
+					}
+				}
 			}
-			err = file.Close()
 			offsetTimestamp = lastTimestamp
+			err = file.Close()
 		}
 	} else {
 		http.NotFound(w, r)
