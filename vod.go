@@ -83,13 +83,16 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 				return nil
 			}
 			modTime := info.ModTime()
-			//fmt.Println(path, modTime, startTime, found)
+			//tmp, _ := strconv.Atoi(strings.TrimSuffix(info.Name(), ".flv"))
+			//fileStartTime := time.Unix(tmp, 10)
 			if !found {
 				if modTime.After(startTime) {
 					found = true
+					//fmt.Println(path, modTime, startTime, found)
 				} else {
 					fileList = []fs.FileInfo{info}
 					offsetTime = startTime.Sub(modTime)
+					//fmt.Println(path, modTime, startTime, found)
 					return nil
 				}
 			}
@@ -115,7 +118,7 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 		flvHead := make([]byte, 9+4)
 		tagHead := make(util.Buffer, 11)
 		//tagLen := make([]byte, 4)
-		var init bool
+		var init, seqAudioWritten, seqVideoWritten bool
 		if offsetTime == 0 {
 			init = true
 		} else {
@@ -144,7 +147,6 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 					offsetTime = 0
 				}
 			}
-
 			for err == nil {
 				_, err = io.ReadFull(reader, tagHead)
 				if err != nil {
@@ -171,18 +173,20 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 				case codec.FLV_TAG_TYPE_SCRIPT:
 					_, err = reader.Discard(int(dataLen) + 4)
 				case codec.FLV_TAG_TYPE_AUDIO:
-					if lastTimestamp == 0 {
+					if !seqAudioWritten {
 						_, err = writer.Write(tagHead)
 						_, err = io.CopyN(writer, reader, int64(dataLen+4))
+						seqAudioWritten = true
 					} else {
 						_, err = reader.Discard(int(dataLen) + 4)
 					}
 				case codec.FLV_TAG_TYPE_VIDEO:
-					if lastTimestamp == 0 {
+					if !seqVideoWritten {
 						_, err = writer.Write(tagHead)
 						_, err = io.CopyN(writer, reader, int64(dataLen+4))
+						seqVideoWritten = true
 					} else {
-						if lastTimestamp > uint32(offsetTime.Milliseconds()) {
+						if lastTimestamp >= uint32(offsetTime.Milliseconds()) {
 							data := make([]byte, dataLen+4)
 							_, err = io.ReadFull(reader, data)
 							frameType := (data[0] >> 4) & 0b0111
