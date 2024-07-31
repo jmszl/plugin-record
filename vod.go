@@ -73,7 +73,7 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 		speedControl := func() {
 			targetTime := time.Duration(float64(time.Since(start)) * speed)
 			sleepTime := time.Duration(lastTimestamp)*time.Millisecond - targetTime
-			//fmt.Println("sleepTime", sleepTime)
+			//fmt.Println("sleepTime", sleepTime, time.Since(start).Milliseconds(), lastTimestamp)
 			if sleepTime > 0 {
 				time.Sleep(sleepTime)
 			}
@@ -145,6 +145,7 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 				_, err = reader.Discard(13)
 				if !init {
 					offsetTime = 0
+					offsetTimestamp = 0
 				}
 			}
 			for err == nil {
@@ -174,6 +175,7 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 					_, err = reader.Discard(int(dataLen) + 4)
 				case codec.FLV_TAG_TYPE_AUDIO:
 					if !seqAudioWritten {
+						putFlvTimestamp(tagHead, 0)
 						_, err = writer.Write(tagHead)
 						_, err = io.CopyN(writer, reader, int64(dataLen+4))
 						seqAudioWritten = true
@@ -182,6 +184,7 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 					}
 				case codec.FLV_TAG_TYPE_VIDEO:
 					if !seqVideoWritten {
+						putFlvTimestamp(tagHead, 0)
 						_, err = writer.Write(tagHead)
 						_, err = io.CopyN(writer, reader, int64(dataLen+4))
 						seqVideoWritten = true
