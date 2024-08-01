@@ -117,7 +117,6 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 		}
 		flvHead := make([]byte, 9+4)
 		tagHead := make(util.Buffer, 11)
-		//tagLen := make([]byte, 4)
 		var init, seqAudioWritten, seqVideoWritten bool
 		if offsetTime == 0 {
 			init = true
@@ -210,6 +209,200 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 			offsetTimestamp = lastTimestamp
 			err = file.Close()
 		}
+	} else {
+		http.NotFound(w, r)
+		return
+	}
+}
+
+func (conf *RecordConfig) Download_flv_(w http.ResponseWriter, r *http.Request) {
+	streamPath := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/download/flv/"), ".flv")
+	singleFile := filepath.Join(conf.Flv.Path, streamPath+".flv")
+	query := r.URL.Query()
+	rangeStr := strings.Split(query.Get("range"), "-")
+	s, err := strconv.Atoi(rangeStr[0])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	startTime := time.UnixMilli(int64(s))
+	e, err := strconv.Atoi(rangeStr[1])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	endTime := time.UnixMilli(int64(e))
+	timeRange := endTime.Sub(startTime)
+	fmt.Println("timeRange", timeRange)
+	dir := filepath.Join(conf.Flv.Path, streamPath)
+	if util.Exist(singleFile) {
+
+	} else if util.Exist(dir) {
+		var fileList []fs.FileInfo
+		var found bool
+		var startOffsetTime time.Duration
+		err = filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error {
+			if info.IsDir() || !strings.HasSuffix(info.Name(), ".flv") {
+				return nil
+			}
+			modTime := info.ModTime()
+			//tmp, _ := strconv.Atoi(strings.TrimSuffix(info.Name(), ".flv"))
+			//fileStartTime := time.Unix(tmp, 10)
+			if !found {
+				if modTime.After(startTime) {
+					found = true
+					//fmt.Println(path, modTime, startTime, found)
+				} else {
+					fileList = []fs.FileInfo{info}
+					startOffsetTime = startTime.Sub(modTime)
+					//fmt.Println(path, modTime, startTime, found)
+					return nil
+				}
+			}
+			if modTime.After(endTime) {
+				return fs.ErrInvalid
+			}
+			fileList = append(fileList, info)
+			return nil
+		})
+		if !found {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "video/x-flv")
+		w.Header().Set("Content-Disposition", "attachment")
+		var writer io.Writer = w
+		flvHead := make([]byte, 9+4)
+		tagHead := make(util.Buffer, 11)
+		var contentLength int64
+		for pass := 0; pass < 2; pass++ {
+			offsetTime := startOffsetTime
+			var offsetTimestamp, lastTimestamp uint32
+			var init, seqAudioWritten, seqVideoWritten bool
+			if pass == 1 {
+				fmt.Println("contentLength", contentLength)
+				w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
+				w.WriteHeader(http.StatusOK)
+			}
+			if offsetTime == 0 {
+				init = true
+			} else {
+				offsetTimestamp = -uint32(offsetTime.Milliseconds())
+			}
+			for i, info := range fileList {
+				if r.Context().Err() != nil {
+					return
+				}
+				filePath := filepath.Join(dir, info.Name())
+				fmt.Println("read", filePath)
+				file, err := os.Open(filePath)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				reader := bufio.NewReader(file)
+				if i == 0 {
+					_, err = io.ReadFull(reader, flvHead)
+					if pass == 0 {
+						contentLength += int64(len(flvHead))
+					} else {
+						// 第一次写入头
+						_, err = writer.Write(flvHead)
+					}
+				} else {
+					// 后面的头跳过
+					_, err = reader.Discard(13)
+					if !init {
+						offsetTime = 0
+						offsetTimestamp = 0
+					}
+				}
+				for err == nil {
+					_, err = io.ReadFull(reader, tagHead)
+					if err != nil {
+						break
+					}
+					tmp := tagHead
+					t := tmp.ReadByte()
+					dataLen := tmp.ReadUint24()
+					lastTimestamp = tmp.ReadUint24() | uint32(tmp.ReadByte())<<24
+					//fmt.Println(lastTimestamp, tagHead)
+					if init {
+						if t == codec.FLV_TAG_TYPE_SCRIPT {
+							_, err = reader.Discard(int(dataLen) + 4)
+						} else {
+							lastTimestamp += offsetTimestamp
+							if lastTimestamp >= uint32(timeRange.Milliseconds()) {
+								break
+							}
+							if pass == 0 {
+								contentLength += int64(11 + dataLen + 4)
+								_, err = reader.Discard(int(dataLen) + 4)
+							} else {
+								putFlvTimestamp(tagHead, lastTimestamp)
+								_, err = writer.Write(tagHead)
+								_, err = io.CopyN(writer, reader, int64(dataLen+4))
+							}
+						}
+						continue
+					}
+					switch t {
+					case codec.FLV_TAG_TYPE_SCRIPT:
+						_, err = reader.Discard(int(dataLen) + 4)
+					case codec.FLV_TAG_TYPE_AUDIO:
+						if !seqAudioWritten {
+							if pass == 0 {
+								contentLength += int64(11 + dataLen + 4)
+								_, err = reader.Discard(int(dataLen) + 4)
+							} else {
+								putFlvTimestamp(tagHead, 0)
+								_, err = writer.Write(tagHead)
+								_, err = io.CopyN(writer, reader, int64(dataLen+4))
+							}
+							seqAudioWritten = true
+						} else {
+							_, err = reader.Discard(int(dataLen) + 4)
+						}
+					case codec.FLV_TAG_TYPE_VIDEO:
+						if !seqVideoWritten {
+							if pass == 0 {
+								contentLength += int64(11 + dataLen + 4)
+								_, err = reader.Discard(int(dataLen) + 4)
+							} else {
+								putFlvTimestamp(tagHead, 0)
+								_, err = writer.Write(tagHead)
+								_, err = io.CopyN(writer, reader, int64(dataLen+4))
+							}
+							seqVideoWritten = true
+						} else {
+							if lastTimestamp >= uint32(offsetTime.Milliseconds()) {
+								data := make([]byte, dataLen+4)
+								_, err = io.ReadFull(reader, data)
+								frameType := (data[0] >> 4) & 0b0111
+								idr := frameType == 1 || frameType == 4
+								if idr {
+									init = true
+									//fmt.Println("init", lastTimestamp)
+									if pass == 0 {
+										contentLength += int64(11 + dataLen + 4)
+									} else {
+										putFlvTimestamp(tagHead, 0)
+										_, err = writer.Write(tagHead)
+										_, err = writer.Write(data)
+									}
+								}
+							} else {
+								_, err = reader.Discard(int(dataLen) + 4)
+							}
+						}
+					}
+				}
+				offsetTimestamp = lastTimestamp
+				err = file.Close()
+			}
+		}
+		fmt.Println("done")
 	} else {
 		http.NotFound(w, r)
 		return
