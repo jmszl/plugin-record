@@ -2,7 +2,6 @@ package record
 
 import (
 	"bufio"
-	"fmt"
 	"go.uber.org/zap"
 	"io"
 	"io/fs"
@@ -129,7 +128,7 @@ func (conf *RecordConfig) Play_flv_(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			filePath := filepath.Join(dir, info.Name())
-			fmt.Println("read", filePath)
+			plugin.Debug("read", zap.String("file", filePath))
 			file, err := os.Open(filePath)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
