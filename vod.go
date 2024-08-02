@@ -3,6 +3,7 @@ package record
 import (
 	"bufio"
 	"fmt"
+	"go.uber.org/zap"
 	"io"
 	"io/fs"
 	"m7s.live/engine/v4/codec"
@@ -233,7 +234,7 @@ func (conf *RecordConfig) Download_flv_(w http.ResponseWriter, r *http.Request) 
 	}
 	endTime := time.UnixMilli(int64(e))
 	timeRange := endTime.Sub(startTime)
-	fmt.Println("timeRange", timeRange)
+	plugin.Info("download", zap.String("stream", streamPath), zap.Time("start", startTime), zap.Time("end", endTime))
 	dir := filepath.Join(conf.Flv.Path, streamPath)
 	if util.Exist(singleFile) {
 
@@ -275,14 +276,38 @@ func (conf *RecordConfig) Download_flv_(w http.ResponseWriter, r *http.Request) 
 		var writer io.Writer = w
 		flvHead := make([]byte, 9+4)
 		tagHead := make(util.Buffer, 11)
-		var contentLength int64
+		var contentLength uint64
+
+		var amf *util.AMF
+		var metaData util.EcmaArray
+		var filepositions []uint64
+		var times []float64
 		for pass := 0; pass < 2; pass++ {
 			offsetTime := startOffsetTime
 			var offsetTimestamp, lastTimestamp uint32
 			var init, seqAudioWritten, seqVideoWritten bool
 			if pass == 1 {
-				fmt.Println("contentLength", contentLength)
-				w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
+				metaData["keyframes"] = map[string]any{
+					"filepositions": filepositions,
+					"times":         times,
+				}
+				amf.Marshals("onMetaData", metaData)
+				offsetDelta := amf.Len() + 15
+				offset := offsetDelta + len(flvHead)
+				contentLength += uint64(offset)
+				metaData["duration"] = timeRange.Seconds()
+				metaData["filesize"] = contentLength
+				for i := range filepositions {
+					filepositions[i] += uint64(offset)
+				}
+				metaData["keyframes"] = map[string]any{
+					"filepositions": filepositions,
+					"times":         times,
+				}
+				amf.Reset()
+				amf.Marshals("onMetaData", metaData)
+				plugin.Info("start download", zap.Any("metaData", metaData))
+				w.Header().Set("Content-Length", strconv.FormatInt(int64(contentLength), 10))
 				w.WriteHeader(http.StatusOK)
 			}
 			if offsetTime == 0 {
@@ -295,7 +320,7 @@ func (conf *RecordConfig) Download_flv_(w http.ResponseWriter, r *http.Request) 
 					return
 				}
 				filePath := filepath.Join(dir, info.Name())
-				fmt.Println("read", filePath)
+				plugin.Debug("read", zap.String("file", filePath))
 				file, err := os.Open(filePath)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -304,11 +329,20 @@ func (conf *RecordConfig) Download_flv_(w http.ResponseWriter, r *http.Request) 
 				reader := bufio.NewReader(file)
 				if i == 0 {
 					_, err = io.ReadFull(reader, flvHead)
-					if pass == 0 {
-						contentLength += int64(len(flvHead))
-					} else {
+					if pass == 1 {
 						// 第一次写入头
 						_, err = writer.Write(flvHead)
+						tagHead[0] = codec.FLV_TAG_TYPE_SCRIPT
+						l := amf.Len()
+						tagHead[1] = byte(l >> 16)
+						tagHead[2] = byte(l >> 8)
+						tagHead[3] = byte(l)
+						putFlvTimestamp(tagHead, 0)
+						writer.Write(tagHead)
+						writer.Write(amf.Buffer)
+						l += 11
+						util.BigEndian.PutUint32(tagHead[:4], uint32(l))
+						writer.Write(tagHead[:4])
 					}
 				} else {
 					// 后面的头跳过
@@ -337,9 +371,17 @@ func (conf *RecordConfig) Download_flv_(w http.ResponseWriter, r *http.Request) 
 								break
 							}
 							if pass == 0 {
-								contentLength += int64(11 + dataLen + 4)
-								_, err = reader.Discard(int(dataLen) + 4)
+								data := make([]byte, dataLen+4)
+								_, err = io.ReadFull(reader, data)
+								frameType := (data[0] >> 4) & 0b0111
+								idr := frameType == 1 || frameType == 4
+								if idr {
+									filepositions = append(filepositions, contentLength)
+									times = append(times, float64(lastTimestamp)/1000)
+								}
+								contentLength += uint64(11 + dataLen + 4)
 							} else {
+								//fmt.Println("write", lastTimestamp)
 								putFlvTimestamp(tagHead, lastTimestamp)
 								_, err = writer.Write(tagHead)
 								_, err = io.CopyN(writer, reader, int64(dataLen+4))
@@ -347,13 +389,25 @@ func (conf *RecordConfig) Download_flv_(w http.ResponseWriter, r *http.Request) 
 						}
 						continue
 					}
+
 					switch t {
 					case codec.FLV_TAG_TYPE_SCRIPT:
-						_, err = reader.Discard(int(dataLen) + 4)
+						if pass == 0 {
+							data := make([]byte, dataLen+4)
+							_, err = io.ReadFull(reader, data)
+							amf = &util.AMF{
+								Buffer: util.Buffer(data[1+2+len("onMetaData") : len(data)-4]),
+							}
+							var obj any
+							obj, err = amf.Unmarshal()
+							metaData = obj.(map[string]any)
+						} else {
+							_, err = reader.Discard(int(dataLen) + 4)
+						}
 					case codec.FLV_TAG_TYPE_AUDIO:
 						if !seqAudioWritten {
 							if pass == 0 {
-								contentLength += int64(11 + dataLen + 4)
+								contentLength += uint64(11 + dataLen + 4)
 								_, err = reader.Discard(int(dataLen) + 4)
 							} else {
 								putFlvTimestamp(tagHead, 0)
@@ -367,7 +421,7 @@ func (conf *RecordConfig) Download_flv_(w http.ResponseWriter, r *http.Request) 
 					case codec.FLV_TAG_TYPE_VIDEO:
 						if !seqVideoWritten {
 							if pass == 0 {
-								contentLength += int64(11 + dataLen + 4)
+								contentLength += uint64(11 + dataLen + 4)
 								_, err = reader.Discard(int(dataLen) + 4)
 							} else {
 								putFlvTimestamp(tagHead, 0)
@@ -383,9 +437,11 @@ func (conf *RecordConfig) Download_flv_(w http.ResponseWriter, r *http.Request) 
 								idr := frameType == 1 || frameType == 4
 								if idr {
 									init = true
-									//fmt.Println("init", lastTimestamp)
+									plugin.Debug("init", zap.Uint32("lastTimestamp", lastTimestamp))
 									if pass == 0 {
-										contentLength += int64(11 + dataLen + 4)
+										filepositions = append(filepositions, contentLength)
+										times = append(times, float64(lastTimestamp)/1000)
+										contentLength += uint64(11 + dataLen + 4)
 									} else {
 										putFlvTimestamp(tagHead, 0)
 										_, err = writer.Write(tagHead)
@@ -402,7 +458,7 @@ func (conf *RecordConfig) Download_flv_(w http.ResponseWriter, r *http.Request) 
 				err = file.Close()
 			}
 		}
-		fmt.Println("done")
+		plugin.Info("end download")
 	} else {
 		http.NotFound(w, r)
 		return
