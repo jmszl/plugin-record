@@ -84,7 +84,11 @@ func (conf *RecordConfig) API_start(w http.ResponseWriter, r *http.Request) {
 	}
 	recorder.FileName = fileName
 	recorder.append = query.Get("append") != ""
-	err = irecorder.Start(streamPath)
+	if fileName != "" {
+		err = irecorder.StartWithFileName(streamPath, fileName)
+	} else {
+		err = irecorder.Start(streamPath)
+	}
 	id = recorder.ID
 	if err != nil {
 		util.ReturnError(util.APIErrorInternal, err.Error(), w, r)

@@ -28,6 +28,11 @@ func (r *MP4Recorder) Start(streamPath string) (err error) {
 	return r.start(r, streamPath, SUBTYPE_RAW)
 }
 
+func (r *MP4Recorder) StartWithFileName(streamPath string, fileName string) error {
+	r.ID = streamPath + "/mp4/" + fileName
+	return r.start(r, streamPath, SUBTYPE_RAW)
+}
+
 func (r *MP4Recorder) Close() (err error) {
 	if r.File != nil {
 		err = r.Movmuxer.WriteTrailer()

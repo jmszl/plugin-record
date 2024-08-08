@@ -14,6 +14,7 @@ import (
 
 type RecordConfig struct {
 	config.Subscribe
+	config.HTTP
 	Flv        Record `desc:"flv录制配置"`
 	Mp4        Record `desc:"mp4录制配置"`
 	Fmp4       Record `desc:"fmp4录制配置"`
