@@ -115,7 +115,7 @@ func (h *HLSRecorder) OnEvent(event any) {
 		h.Clear()
 		h.video_cc = pes.ContinuityCounter
 	case SEclose:
-		h.playlist.WriteEndList()
+		_ = h.playlist.WriteEndList()
 	default:
 		h.Recorder.OnEvent(v)
 	}

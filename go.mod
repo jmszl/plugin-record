@@ -49,4 +49,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace m7s.live/plugin/hls/v4 => github.com/jmszl/plugin-hls/v4 v4.0.0
+replace m7s.live/plugin/hls/v4 => github.com/jmszl/plugin-hls/v4 v4.0.10
