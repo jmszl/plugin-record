@@ -5,6 +5,7 @@ import (
 	"github.com/Eyevinn/mp4ff/mp4"
 	. "m7s.live/engine/v4"
 	"m7s.live/engine/v4/codec"
+	"time"
 )
 
 type mediaContext struct {
@@ -41,6 +42,26 @@ type FMP4Recorder struct {
 	audio       mediaContext
 	seqNumber   uint32
 	ftyp        *mp4.FtypBox
+}
+
+func (r *FMP4Recorder) SetId(string) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (r *FMP4Recorder) GetRecordModeString(mode RecordMode) string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (r *FMP4Recorder) StartWithDynamicTimeout(streamPath, fileName string, timeout time.Duration) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (r *FMP4Recorder) UpdateTimeout(timeout time.Duration) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func NewFMP4Recorder() *FMP4Recorder {

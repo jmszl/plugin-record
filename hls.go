@@ -24,6 +24,26 @@ type HLSRecorder struct {
 	MemoryTs
 }
 
+func (h *HLSRecorder) SetId(string) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (h *HLSRecorder) GetRecordModeString(mode RecordMode) string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (h *HLSRecorder) StartWithDynamicTimeout(streamPath, fileName string, timeout time.Duration) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (h *HLSRecorder) UpdateTimeout(timeout time.Duration) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func NewHLSRecorder() (r *HLSRecorder) {
 	r = &HLSRecorder{}
 	r.Record = RecordPluginConfig.Hls

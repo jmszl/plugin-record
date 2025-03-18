@@ -4,12 +4,24 @@ import (
 	"bufio"
 	"io"
 	"path/filepath"
-	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
 	. "m7s.live/engine/v4"
 )
+
+// 录像类型
+type RecordMode int
+
+// 使用常量块和 iota 来定义枚举值
+const (
+	OrdinaryMode RecordMode = iota // iota 初始值为 0，表示普通录像(连续录像)，包括自动录像和手动录像
+	EventMode                      // 1，表示事件录像
+)
+
+// 判断是否有写入帧，用于解决pullonstart时拉取的流为空的情况下，生成空文件的问题
+var isWrifeFrame = false
 
 type IRecorder interface {
 	ISubscriber
@@ -18,6 +30,10 @@ type IRecorder interface {
 	StartWithFileName(streamPath string, fileName string) error
 	io.Closer
 	CreateFile() (FileWr, error)
+	StartWithDynamicTimeout(streamPath, fileName string, timeout time.Duration) error
+	UpdateTimeout(timeout time.Duration)
+	GetRecordModeString(mode RecordMode) string
+	SetId(streamPath string)
 }
 
 type Recorder struct {
@@ -54,14 +70,25 @@ func (r *Recorder) CreateFile() (f FileWr, err error) {
 	return
 }
 
+// transform 函数处理字符串并返回格式化的结果
+func transform(input string) string {
+	parts := strings.Split(input, "/")
+	if len(parts) > 1 {
+		return strings.Join(parts[1:], "-") // 返回除第一个索引外的所有部分
+	}
+	return input // 默认返回原始输入
+}
+
 func (r *Recorder) getFileName(streamPath string) (filename string) {
-	filename = streamPath
+	if RecordPluginConfig.RecordPathNotShowStreamPath {
+		filename = streamPath
+	}
 	if r.Fragment == 0 {
 		if r.FileName != "" {
 			filename = filepath.Join(filename, r.FileName)
 		}
 	} else {
-		filename = filepath.Join(filename, strconv.FormatInt(time.Now().Unix(), 10))
+		filename = filepath.Join(filename, transform(streamPath)+"_"+time.Now().Format("2006-01-02-15-04-05"))
 	}
 	return
 }
@@ -82,7 +109,7 @@ func (r *Recorder) start(re IRecorder, streamPath string, subType byte) (err err
 }
 
 func (r *Recorder) cut(absTime uint32) {
-	if ts := absTime - r.SkipTS; time.Duration(ts)*time.Millisecond >= r.Fragment {
+	if ts := absTime - r.SkipTS; (time.Duration(ts)*time.Millisecond <= r.Fragment && r.Fragment-time.Duration(ts)*time.Millisecond <= time.Second) || time.Duration(ts)*time.Millisecond >= r.Fragment {
 		r.SkipTS = absTime
 		r.Close()
 		if file, err := r.Spesific.(IRecorder).CreateFile(); err == nil {
@@ -114,6 +141,18 @@ func (r *Recorder) OnEvent(event any) {
 			r.cut(v.AbsTime)
 		}
 	case VideoFrame:
+		isWrifeFrame = true
+		if v.IFrame {
+			//plugin.Error("this is keyframe and absTime is " + strconv.FormatUint(uint64(v.AbsTime), 10))
+			//go func() { //将视频关键帧的数据存入sqlite数据库中
+			//	var flvKeyfram = &FLVKeyframe{FLVFileName: r.Path + "/" + strings.ReplaceAll(r.filePath, "\\", "/"), FrameOffset: r.VideoReader, FrameAbstime: v.AbsTime}
+			//	sqlitedb.Create(flvKeyfram)
+			//}()
+			//r.Info("这是关键帧，且取到了r.filePath是" + r.Path + r.filePath)
+			//r.Info("这是关键帧，且取到了r.VideoReader.AbsTime是" + strconv.FormatUint(uint64(v.FrameAbstime), 10))
+			//r.Info("这是关键帧，且取到了r.Offset是" + strconv.Itoa(int(v.FrameOffset)))
+			//r.Info("这是关键帧，且取到了r.Offset是" + r.Stream.Path)
+		}
 		if r.Fragment > 0 && v.IFrame {
 			r.cut(v.AbsTime)
 		}

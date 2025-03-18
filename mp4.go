@@ -2,6 +2,9 @@ package record
 
 import (
 	"net"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/yapingcat/gomedia/go-mp4"
 	"go.uber.org/zap"
@@ -15,6 +18,26 @@ type MP4Recorder struct {
 	*mp4.Movmuxer `json:"-" yaml:"-"`
 	videoId       uint32
 	audioId       uint32
+}
+
+func (r *MP4Recorder) SetId(string) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (r *MP4Recorder) GetRecordModeString(mode RecordMode) string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (r *MP4Recorder) StartWithDynamicTimeout(streamPath, fileName string, timeout time.Duration) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (r *MP4Recorder) UpdateTimeout(timeout time.Duration) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func NewMP4Recorder() *MP4Recorder {
@@ -35,15 +58,29 @@ func (r *MP4Recorder) StartWithFileName(streamPath string, fileName string) erro
 
 func (r *MP4Recorder) Close() (err error) {
 	if r.File != nil {
-		err = r.Movmuxer.WriteTrailer()
-		if err != nil {
-			r.Error("mp4 write trailer", zap.Error(err))
+		if !isWrifeFrame {
+			fullPath := filepath.Join(r.Path, "/", r.filePath)
+			go func(f FileWr) {
+				err = r.File.Close()
+				err = os.Remove(fullPath)
+				if err != nil {
+					r.Info("未写入帧，文件为空，直接删除，删除结果为=======" + err.Error())
+				}
+			}(r.File)
 		} else {
-			// _, err = r.file.Write(r.cache.buf)
-			r.Info("mp4 write trailer", zap.Error(err))
+			go func(f FileWr) {
+				err = r.Movmuxer.WriteTrailer()
+				if err != nil {
+					r.Error("mp4 write trailer", zap.Error(err))
+				} else {
+					// _, err = r.file.Write(r.cache.buf)
+					r.Info("mp4 write trailer", zap.Error(err))
+				}
+				err = f.Close()
+			}(r.File)
 		}
-		err = r.File.Close()
 	}
+	isWrifeFrame = false
 	return
 }
 func (r *MP4Recorder) setTracks() {

@@ -5,11 +5,32 @@ import (
 	. "m7s.live/engine/v4"
 	"m7s.live/engine/v4/codec"
 	"m7s.live/engine/v4/track"
+	"time"
 )
 
 type RawRecorder struct {
 	Recorder
 	IsAudio bool
+}
+
+func (r *RawRecorder) SetId(string) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (r *RawRecorder) GetRecordModeString(mode RecordMode) string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (r *RawRecorder) StartWithDynamicTimeout(streamPath, fileName string, timeout time.Duration) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (r *RawRecorder) UpdateTimeout(timeout time.Duration) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func NewRawRecorder() (r *RawRecorder) {

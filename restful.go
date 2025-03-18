@@ -61,7 +61,7 @@ func (conf *RecordConfig) API_start(w http.ResponseWriter, r *http.Request) {
 		t = "flv"
 		fallthrough
 	case "flv":
-		irecorder = NewFLVRecorder()
+		irecorder = NewFLVRecorder(OrdinaryMode)
 	case "mp4":
 		irecorder = NewMP4Recorder()
 	case "fmp4":
